@@ -55,9 +55,7 @@ jobs:
           -configuration Release \
           -destination 'generic/platform=iOS' \
           -archivePath $PWD/build.xcarchive \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" \
           PROVISIONING_PROFILE_SPECIFIER="" \
           archive
           
@@ -86,6 +84,20 @@ jobs:
         mkdir -p Payload
         cp -R WinkorNext.app Payload/
         
+        # Fix executable permissions
+        if [ -f "Payload/WinkorNext.app/winkor_engine" ]; then
+          echo "🔧 Setting execute permissions for winkor_engine"
+          chmod +x Payload/WinkorNext.app/winkor_engine
+          ls -la Payload/WinkorNext.app/winkor_engine
+        elif [ -f "Payload/WinkorNext.app/Engine/winkor_engine" ]; then
+          echo "🔧 Setting execute permissions for Engine/winkor_engine"
+          chmod +x Payload/WinkorNext.app/Engine/winkor_engine
+          ls -la Payload/WinkorNext.app/Engine/winkor_engine
+        else
+          echo "⚠️ winkor_engine not found in expected locations"
+          find Payload/WinkorNext.app -name "winkor_engine" -type f
+        fi
+        
         # Verify winkor_engine is included
         if [ -f "Payload/WinkorNext.app/winkor_engine" ]; then
           echo "✅ winkor_engine found in app bundle"
@@ -113,14 +125,14 @@ jobs:
         unzip -l WinkorNext.ipa | head -20
         
     - name: Upload IPA Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: WinkorNext-iPA
         path: WinkorNext.ipa
         retention-days: 30
         
     - name: Upload Build Logs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-logs
         path: |
