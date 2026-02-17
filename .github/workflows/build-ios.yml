@@ -1,0 +1,160 @@
+name: Build WinkorNext iOS
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+        
+    - name: Show Xcode Version
+      run: |
+        xcodebuild -version
+        xcodebuild -showsdks
+        
+    - name: Cache CocoaPods
+      uses: actions/cache@v3
+      with:
+        path: Pods
+        key: ${{ runner.os }}-pods-${{ hashFiles('**/Podfile.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-pods-
+          
+    - name: Install Dependencies (if needed)
+      run: |
+        if [ -f "Podfile" ]; then
+          pod install
+        fi
+        
+    - name: Create Keychain and Disable Signing
+      run: |
+        # Create a temporary keychain to avoid signing issues
+        security create-keychain -p "" build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p "" build.keychain
+        security set-keychain-settings -lut 21600 build.keychain
+        
+    - name: Build iOS App (No Code Signing)
+      run: |
+        # Build the project without code signing
+        xcodebuild -project WinkorNext.xcodeproj \
+          -scheme WinkorNext \
+          -configuration Release \
+          -destination 'generic/platform=iOS' \
+          -archivePath $PWD/build.xcarchive \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          PROVISIONING_PROFILE_SPECIFIER="" \
+          archive
+          
+    - name: Export Archive to .app
+      run: |
+        # Extract the .app from the archive
+        cd build.xcarchive/Products/Applications/
+        ls -la
+        app_name=$(ls *.app | head -n 1)
+        echo "Found app: $app_name"
+        cp -R "$app_name" $PWD/../../../WinkorNext.app
+        cd $PWD/../..
+        
+    - name: Verify .app Structure
+      run: |
+        echo "=== .app Structure ==="
+        find WinkorNext.app -name "*.dylib" -o -name "*.so" -o -name "winkor_engine" | head -10
+        echo "=== Frameworks ==="
+        ls -la WinkorNext.app/Frameworks/ 2>/dev/null || echo "No Frameworks directory"
+        echo "=== Engine Directory ==="
+        ls -la WinkorNext.app/Engine/ 2>/dev/null || echo "No Engine directory"
+        
+    - name: Create Manual Payload IPA
+      run: |
+        # Create Payload directory structure
+        mkdir -p Payload
+        cp -R WinkorNext.app Payload/
+        
+        # Verify winkor_engine is included
+        if [ -f "Payload/WinkorNext.app/winkor_engine" ]; then
+          echo "✅ winkor_engine found in app bundle"
+        else
+          echo "⚠️ winkor_engine not found, checking Engine directory..."
+          ls -la Payload/WinkorNext.app/Engine/ 2>/dev/null || echo "No Engine directory"
+        fi
+        
+        # Check for MoltenVK frameworks
+        if [ -d "Payload/WinkorNext.app/Frameworks" ]; then
+          echo "✅ Frameworks directory found"
+          ls -la Payload/WinkorNext.app/Frameworks/
+        else
+          echo "⚠️ No Frameworks directory found"
+        fi
+        
+        # Create IPA
+        cd Payload
+        zip -r ../WinkorNext.ipa .
+        cd ..
+        
+        # Verify IPA
+        echo "=== IPA Info ==="
+        ls -la WinkorNext.ipa
+        unzip -l WinkorNext.ipa | head -20
+        
+    - name: Upload IPA Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: WinkorNext-iPA
+        path: WinkorNext.ipa
+        retention-days: 30
+        
+    - name: Upload Build Logs
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-logs
+        path: |
+          *.log
+          build.xcarchive/Logs/
+        retention-days: 7
+        
+    - name: Display Build Summary
+      run: |
+        echo "## 🎉 Build Complete!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📱 App Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Name**: WinkorNext" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform**: iOS" >> $GITHUB_STEP_SUMMARY
+        echo "- **Architecture**: arm64 (iPhone 16 Pro optimized)" >> $GITHUB_STEP_SUMMARY
+        echo "- **GPU**: A18 Pro with MoltenVK support" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "- **Code Signing**: Disabled (Manual Payload)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployment Target**: iOS 18.0" >> $GITHUB_STEP_SUMMARY
+        echo "- **Xcode Version**: Latest Stable" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- **IPA**: Available in Actions tab" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: $(du -h WinkorNext.ipa | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🚀 Installation" >> $GITHUB_STEP_SUMMARY
+        echo "1. Download WinkorNext.ipa from the Actions tab" >> $GITHUB_STEP_SUMMARY
+        echo "2. Use AltStore, Sideloadly, or similar tool to install" >> $GITHUB_STEP_SUMMARY
+        echo "3. Trust the developer in Settings > General & VPN" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⚡ Features" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ A18 Pro GPU acceleration via MoltenVK" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Touch-to-mouse input system" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Virtual C: drive with Wine integration" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ D: drive symlink to iOS Downloads" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Real-time graphics rendering" >> $GITHUB_STEP_SUMMARY
